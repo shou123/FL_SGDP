@@ -116,12 +116,18 @@ def forward(model, i, data):
     return targets, model.compute_scores(seq_hidden, mask)
     
 
-def train_test_pred(model,train_data_list,train_silces,test_data_list,test_silces,top_k = 20):
+def train_test_pred(model,train_data_list,train_silces,test_data_list,test_silces,client_id,top_k = 20):
     model.train()
     total_loss = 0.0
+    client_pred_log = {}
+    train_all_targets = []
+    train_all_pred=[]
     for train_data, i, j in tqdm(zip(train_data_list,train_silces, np.arange(len(train_silces)))):
         model.optimizer.zero_grad()
         targets, scores = forward(model, i, train_data)
+        train_all_pred.extend(scores)
+        train_all_targets.extend(targets)
+
         targets = trans_to_cuda(torch.Tensor(targets).long())
         loss = model.loss_function(scores, targets)
         loss.backward()
@@ -130,6 +136,23 @@ def train_test_pred(model,train_data_list,train_silces,test_data_list,test_silce
         print('[%d/%d] Loss: %.4f' % (j, len(train_silces), loss.item()),end='\r')
         if j % int(len(train_silces) / 5 + 1) == 0:
             print('[%d/%d] Loss: %.4f' % (j, len(train_silces), loss.item()))
+
+        # Capture prediction per client
+        # top_preds = scores.topk(top_k)[1]
+        # # Ensure 'train_data' key exists in client_pred_log
+        # if 'train_data' not in client_pred_log:
+        #     client_pred_log['train_data'] = {}
+
+        # # Ensure client_id key exists under 'train_data'
+        # if client_id not in client_pred_log['train_data']:
+        #     client_pred_log['train_data'][client_id] = {}
+
+        # # Add predictions and targets for the current batch
+        # client_pred_log['train_data'][client_id][j] = {
+        #     'train_targets': targets,
+        #     'train_preds': top_preds,
+        # }
+
     print('\tLoss: %.3f' % total_loss)
     model.scheduler.step()
     model.eval()
@@ -142,4 +165,16 @@ def train_test_pred(model,train_data_list,train_silces,test_data_list,test_silce
             sub_scores = trans_to_cpu(sub_scores).detach().numpy()
             all_pred.extend(sub_scores)
             all_targets.extend(targets)
+
+            # Ensure 'train_data' key exists in client_pred_log
+            # if 'test_data' not in client_pred_log:
+            #     client_pred_log['test_data'] = {}
+
+            # # Ensure client_id key exists under 'train_data'
+            # if client_id not in client_pred_log['test_data']:
+            #     client_pred_log['test_data'][client_id] = {
+            #     'test_targets': targets,
+            #     'test_preds': sub_scores,
+            #     }
+
     return all_pred,all_targets

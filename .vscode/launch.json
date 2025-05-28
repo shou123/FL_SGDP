@@ -39,6 +39,7 @@
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
             "justMyCode": true,
+            "args":[  "--NUM_CLIENTS", "1", "--run_type", "distributed" ]
         }
     ]
 }

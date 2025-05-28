@@ -1,5 +1,6 @@
 import networkx as nx
 import numpy as np
+import torch
 
 
 def build_graph(train_data):
@@ -16,7 +17,7 @@ def build_graph(train_data):
         for j, i in graph.in_edges(node):
             sum += graph.get_edge_data(j, i)['weight']
         if sum != 0:
-            for j, i in graph.in_edges(i):
+            for j, i in graph.in_edges(node):
                 graph.add_edge(j, i, weight=graph.get_edge_data(j, i)['weight'] / sum)
     return graph
 
@@ -127,3 +128,44 @@ def topn_test():
         mrr_topn[i] = np.mean(mrr) * 100
         print(np.mean(hit) * 100,np.mean(mrr) * 100)
     print(hit_topn,mrr_topn)
+
+
+def split_list(data_list, num_splits):
+    """
+    Splits a list into approximately equal parts.
+    """
+    avg = len(data_list) // num_splits
+    remainder = len(data_list) % num_splits
+    splits = []
+    start = 0
+    for i in range(num_splits):
+        end = start + avg + (1 if i < remainder else 0)
+        splits.append(data_list[start:end])
+        start = end
+    return splits
+
+def trans_to_cuda(tensor):
+    """
+    Move a tensor to the GPU (CUDA device) if available.
+
+    Args:
+        tensor: A PyTorch tensor or model.
+
+    Returns:
+        The tensor or model on the GPU.
+    """
+    if torch.cuda.is_available():
+        return tensor.cuda()
+    return tensor
+
+def trans_to_cpu(tensor):
+    """
+    Move a tensor to the CPU.
+
+    Args:
+        tensor: A PyTorch tensor or model.
+
+    Returns:
+        The tensor or model on the CPU.
+    """
+    return tensor.cpu()

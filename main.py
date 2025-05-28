@@ -9,11 +9,13 @@ import pandas as pd
 import numpy as np
 
 
-from utils import Data, split_validation
+from utils import Data, build_graph
 from model import *
 from tqdm import tqdm
 from collections import Counter
 from cache import *
+import matplotlib.pyplot as plt
+from run_modes import run_distributed, run_federated
 
 
 parser = argparse.ArgumentParser()
@@ -21,7 +23,7 @@ parser.add_argument('--batchSize', type=int,
                     default=128, help='input batch size')
 parser.add_argument('--hiddenSize', type=int,
                     default=100, help='hidden state size')
-parser.add_argument('--epoch', type=int, default=5,
+parser.add_argument('--epoch', type=int, default=20,
                     help='the number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.001,
                     help='learning rate')  # [0.001, 0.0005, 0.0001]
@@ -47,6 +49,10 @@ parser.add_argument('--dataset_percent', type=float, default=1.0,
                     help='datasets percent for training and testing')
 parser.add_argument('--window', type=int, default=32, help='window')
 parser.add_argument('--topnum', type=int, default=1000, help='top n')
+
+parser.add_argument('--NUM_CLIENTS', type=int, default=10, help='number of client')
+parser.add_argument('--run_type', type=str, default="distributed", help='distributed or federated')
+
 opt = parser.parse_args()
 print(opt)
 
@@ -115,6 +121,8 @@ def trace2input(dicts, trace, window_size=32):
     return inputs, targets
 
 
+
+
 def dataset2input(dataset, window_size=32, method='top', top_num=1000):
     if method == 'top':
         print('\ntrain dataset, trace name:\t', dataset, '\n')
@@ -135,10 +143,11 @@ def dataset2input(dataset, window_size=32, method='top', top_num=1000):
 
         train_data = tuple(trace2input(
             dicts, train_trace, window_size=window_size))
+        graph = build_graph(train_data[0])
+        
         test_data = tuple(trace2input(
             dicts, test_trace, window_size=window_size))
-
-        train_data = Data(train_data, shuffle=True)
+        train_data = Data(train_data, shuffle=True,graph = graph)
         test_data = Data(test_data, shuffle=False)
 
         train_silces = train_data.generate_batch(opt.batchSize)
@@ -158,6 +167,35 @@ def dataset2input(dataset, window_size=32, method='top', top_num=1000):
         n_node = top_num + 3
 
         return train_data_list, train_silces, test_data_list, test_silces, dicts, n_node, train_trace, test_trace
+
+
+
+def dataset2input_cached(dataset, window_size=32, top_num=1000, cache_dir="cache"):
+    """
+    Wrapper for dataset2input to cache the result to a file.
+    """
+    # Create cache directory if it doesn't exist
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # Define the cache file path
+    cache_file = os.path.join(cache_dir, f"{dataset}_window{window_size}_top{top_num}.pkl")
+
+    # Check if the cache file exists
+    if os.path.exists(cache_file):
+        print(f"Loading cached dataset2input result from {cache_file}...")
+        with open(cache_file, "rb") as f:
+            return pickle.load(f)
+
+    # If cache doesn't exist, compute the result
+    print(f"Cache not found. Computing dataset2input for {dataset}...")
+    result = dataset2input(dataset, window_size=window_size, top_num=top_num)
+
+    # Save the result to the cache file
+    with open(cache_file, "wb") as f:
+        pickle.dump(result, f)
+        print(f"Saved dataset2input result to {cache_file}.")
+
+    return result
 
 
 def single_cache_test(test_trace, all_pred, save_name, dicts):
@@ -211,35 +249,47 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = str(deviceID)
     device = torch.device('cuda:'+str(deviceID))
 
-    for dataset in dataset_col:
-        train_data_list, train_silces, test_data_list, test_silces, dicts, n_node, train_trace, test_trace = dataset2input(
-            dataset=dataset, window_size=opt.window, top_num=opt.topnum)
+    # Check the run type and execute the corresponding logic
+    if opt.run_type == "distributed":
+        print("Running in Distributed Learning Mode...")
+        run_distributed(opt, dataset_col, dataset2input_cached)
+    elif opt.run_type == "federated":
+        print("Running in Federated Learning Mode...")
+        run_federated(opt, dataset_col, dataset2input_cached)
+    else:
+        raise ValueError("Invalid run type. Choose 'distributed' or 'federated'.")
 
-        model = trans_to_cuda(SessionGraph(opt, n_node))
-        model_path = 'checkpoint/'+'model_' + \
-            str(dataset)+'_'+time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
-        folder = os.path.exists(model_path)
-        if not folder:
-            os.makedirs(model_path)
-        print('\nModel_Path:', model_path)
-        print('\n-------------------------------------------------------\n')
-        for epoch in range(opt.epoch):
-            print('\n-------------------------------------------------------\n')
-            print('epoch: ', epoch)
-            print('start training: ')
-            all_pred,all_targets = train_test_pred(
-                model, train_data_list, train_silces, test_data_list, test_silces)
+        #========================================================================================
 
-            save_name = dataset+'_'+str(epoch)+'_epoch'
-            print('start cache test: ')
-            _ = single_cache_test(
-                test_trace=test_trace[opt.window:-1], all_pred=all_pred, save_name=save_name, dicts=dicts)
-            pre,mmr = score_compute(all_preds=all_pred,all_targets=all_targets,save_name = save_name)
-            print('pre:',pre)
-            print('mmr:',mmr)
-            torch.save(model, os.path.join(model_path, str(epoch)+'.pt'))
-        torch.cuda.empty_cache()
-        print('-------------------------------------------------------')
+    # model = trans_to_cuda(SessionGraph(opt, n_node))
+    # model_path = 'checkpoint/'+'model_' + \
+    #     str(dataset)+'_'+time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
+    # folder = os.path.exists(model_path)
+    # if not folder:
+    #     os.makedirs(model_path)
+    # print('\nModel_Path:', model_path)
+    # print('\n-------------------------------------------------------\n')
+    # for epoch in range(opt.epoch):
+    #     print('\n-------------------------------------------------------\n')
+    #     print('epoch: ', epoch)
+    #     print('start training: ')
+    #     all_pred,all_targets = train_test_pred(
+    #         model, train_data_list, train_silces, test_data_list, test_silces)
+
+    #     save_name = dataset+'_'+str(epoch)+'_epoch'
+    #     print('start cache test: ')
+    #     _ = single_cache_test(
+    #         test_trace=test_trace[opt.window:-1], all_pred=all_pred, save_name=save_name, dicts=dicts)
+    #     pre,mmr = score_compute(all_preds=all_pred,all_targets=all_targets,save_name = save_name)
+    #     print('pre:',pre)
+    #     print('mmr:',mmr)
+    #     torch.save(model, os.path.join(model_path, str(epoch)+'.pt'))
+
+    
+    torch.cuda.empty_cache()
+    print('-------------------------------------------------------')
+
+
 
 
 if __name__ == '__main__':
