@@ -153,7 +153,8 @@ def train_test_pred(model,train_data_list,train_silces,test_data_list,test_silce
         #     'train_preds': top_preds,
         # }
 
-    print('\tLoss: %.3f' % total_loss)
+    # print('\tLoss: %.3f' % total_loss)
+    print('\tAverage Loss: %.3f' % (total_loss.item() / len(train_silces)))
     model.scheduler.step()
     model.eval()
     with torch.no_grad():

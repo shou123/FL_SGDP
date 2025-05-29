@@ -81,6 +81,7 @@ class Data():
             items.append(node.tolist() + (max_n_node - len(node)) * [0])
             u_A = np.zeros((max_n_node, max_n_node))
 
+            # Full Connection
             for i in np.arange(len(u_input) - 1):
                 if u_input[i + 1] == 0:
                     break
@@ -88,7 +89,7 @@ class Data():
                 for j in np.arange(1, len(node)-i-1):
                     v = np.where(node == u_input[i + j])[0][0]
                     u_A[u][v] = 1
-
+            # Sequential Connection
             for i in np.arange(len(u_input) - 1):
                 if u_input[i + 1] == 0:
                     break

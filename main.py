@@ -197,50 +197,6 @@ def dataset2input_cached(dataset, window_size=32, top_num=1000, cache_dir="cache
 
     return result
 
-
-def single_cache_test(test_trace, all_pred, save_name, dicts):
-    bo_map, bo_map_div, operation_id_map, operation_id_map_div = dicts
-    hit_rate = []
-    prehit_rate = []
-    stats = []
-    caches = {}
-    maxsize = [5] + \
-        [i*10 for i in range(1, 10)] + [i*100 for i in range(1, 11)]
-
-    for i in range(len(maxsize)):
-        caches["LRU"+str(maxsize[i])] = CacheTest(maxsize[i])
-
-    for i in tqdm(range(0, len(test_trace))):
-        for name, cache in caches.items():
-            cache.push_normal(test_trace[i])
-            if all_pred[i][0] > 0:
-                cache.push_prefetch(
-                    test_trace[i] - operation_id_map_div[bo_map_div[all_pred[i][0]-1]])###
-
-    for name, cache in caches.items():
-        print(format(cache.get_hit_rate(), '.4f'), format(
-            cache.get_prehit_rate(), '.4f'), '\t', name)
-        hit_rate.append(cache.get_hit_rate())
-        prehit_rate.append(cache.get_prehit_rate())
-        stats.append(cache.get_stats())
-
-    np.savetxt('dataset/hit_results/'+save_name+'_hit_rate.txt', hit_rate, fmt='%.4f')
-    np.savetxt('dataset/hit_results/'+save_name +
-               '_pre_hit_rate.txt', prehit_rate, fmt='%.4f')
-    np.savetxt('dataset/hit_results/'+save_name+'_stats.txt', stats, fmt='%d')
-    return 0
-
-def score_compute(all_preds,all_targets,save_name):
-    
-    pre_list = []
-    mmr_list = []
-    for i in range(1,len(all_preds[0])):
-        pre_list.append(np.mean([np.where(t in p[:i],1,0) for t,p in zip(all_targets,all_preds)]))
-        mmr_list.append(np.mean([1/(np.where(p[:i]==t)[0]+1) if t in p[:i] else 0 for t,p in zip(all_targets,all_preds)]))
-    np.savetxt('dataset/hit_results/'+save_name+'_pre_list.txt', pre_list, fmt='%.4f')  
-    np.savetxt('dataset/hit_results/'+save_name +'_mmr_list.txt', mmr_list, fmt='%.4f')
-    return pre_list,mmr_list
-
     
 def main():
     dataset_col = ['src1_2']#'ftds_0802_1021_trace','ftds_0805_17_trace',

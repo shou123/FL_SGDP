@@ -7,12 +7,57 @@ from utils import split_list
 from model import *
 from torch.utils.data import DataLoader
 import torch.nn as nn
+from cache import *
 
 # Federated learning requires Flower framework
 try:
     import flwr as fl
 except ImportError:
     fl = None
+
+
+def single_cache_test(test_trace, all_pred, save_name, dicts):
+    bo_map, bo_map_div, operation_id_map, operation_id_map_div = dicts
+    hit_rate = []
+    prehit_rate = []
+    stats = []
+    caches = {}
+    maxsize = [5] + \
+        [i*10 for i in range(1, 10)] + [i*100 for i in range(1, 11)]
+
+    for i in range(len(maxsize)):
+        caches["LRU"+str(maxsize[i])] = CacheTest(maxsize[i])
+
+    for i in tqdm(range(0, len(test_trace))):
+        for name, cache in caches.items():
+            cache.push_normal(test_trace[i])
+            if all_pred[i][0] > 0:
+                cache.push_prefetch(
+                    test_trace[i] - operation_id_map_div[bo_map_div[all_pred[i][0]-1]])###
+
+    for name, cache in caches.items():
+        print(format(cache.get_hit_rate(), '.4f'), format(
+            cache.get_prehit_rate(), '.4f'), '\t', name)
+        hit_rate.append(cache.get_hit_rate())
+        prehit_rate.append(cache.get_prehit_rate())
+        stats.append(cache.get_stats())
+
+    np.savetxt('dataset/hit_results/'+save_name+'_hit_rate.txt', hit_rate, fmt='%.4f')
+    np.savetxt('dataset/hit_results/'+save_name +
+               '_pre_hit_rate.txt', prehit_rate, fmt='%.4f')
+    np.savetxt('dataset/hit_results/'+save_name+'_stats.txt', stats, fmt='%d')
+    return 0
+
+def score_compute(all_preds,all_targets,save_name):
+    
+    pre_list = []
+    mmr_list = []
+    for i in range(1,len(all_preds[0])):
+        pre_list.append(np.mean([np.where(t in p[:i],1,0) for t,p in zip(all_targets,all_preds)]))
+        mmr_list.append(np.mean([1/(np.where(p[:i]==t)[0]+1) if t in p[:i] else 0 for t,p in zip(all_targets,all_preds)]))
+    np.savetxt('dataset/hit_results/'+save_name+'_pre_list.txt', pre_list, fmt='%.4f')  
+    np.savetxt('dataset/hit_results/'+save_name +'_mmr_list.txt', mmr_list, fmt='%.4f')
+    return pre_list,mmr_list
 
 
 def run_distributed(opt, dataset_col, dataset2input_cached):
@@ -49,8 +94,6 @@ def run_distributed(opt, dataset_col, dataset2input_cached):
             client_train_slices = client_train_slices[client_id]  # Use client-specific slices
             client_test_slices = client_test_slices[client_id]
 
-            client_logs_across_epochs = {}
-
             for epoch in range(opt.epoch):
                 print('\n-------------------------------------------------------\n')
                 print(f'Client {client_id + 1} | Epoch: {epoch}')
@@ -58,15 +101,16 @@ def run_distributed(opt, dataset_col, dataset2input_cached):
                 all_pred, all_targets = train_test_pred(
                     model, client_train, client_train_slices, client_test, client_test_slices,client_id)
 
-                # print('Start cache test: ')
-                # _ = single_cache_test(
-                #     test_trace=test_trace[opt.window:-1], all_pred=all_pred, save_name=save_name, dicts=dicts)
-                # pre, mmr = score_compute(all_preds=all_pred, all_targets=all_targets, save_name=save_name)
-                # print('Precision:', pre)
-                # print('MMR:', mmr)
+                save_name = dataset+'_'+str(epoch)+'_epoch'
+                print('Start cache test: ')
+                _ = single_cache_test(
+                    test_trace=test_trace[opt.window:-1], all_pred=all_pred, save_name=save_name, dicts=dicts)
+                pre, mmr = score_compute(all_preds=all_pred, all_targets=all_targets, save_name=save_name)
+                print('Precision:', pre)
+                print('MMR:', mmr)
 
                 # Save the model for the client
-                # torch.save(model, os.path.join(model_path, f'client_{client_id + 1}_epoch_{epoch}.pt'))
+                torch.save(model, os.path.join(model_path, f'client_{client_id + 1}_epoch_{epoch}.pt'))
 
         # plot_overall_client_predictions(client_logs_across_epochs)
         torch.cuda.empty_cache()
