@@ -8,6 +8,7 @@ from model import *
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from cache import *
+from codecarbon import EmissionsTracker
 
 # Federated learning requires Flower framework
 try:
@@ -54,7 +55,8 @@ def score_compute(all_preds,all_targets,save_name):
     mmr_list = []
     for i in range(1,len(all_preds[0])):
         pre_list.append(np.mean([np.where(t in p[:i],1,0) for t,p in zip(all_targets,all_preds)]))
-        mmr_list.append(np.mean([1/(np.where(p[:i]==t)[0]+1) if t in p[:i] else 0 for t,p in zip(all_targets,all_preds)]))
+        # mmr_list.append(np.mean([1/(np.where(p[:i]==t)[0]+1) if t in p[:i] else 0 for t,p in zip(all_targets,all_preds)]))
+        mmr_list.append(np.mean([1/(np.where(p[:i]==t)[0][0]+1) if t in p[:i] else 0 for t,p in zip(all_targets,all_preds)]))
     np.savetxt('dataset/hit_results/'+save_name+'_pre_list.txt', pre_list, fmt='%.4f')  
     np.savetxt('dataset/hit_results/'+save_name +'_mmr_list.txt', mmr_list, fmt='%.4f')
     return pre_list,mmr_list
@@ -94,6 +96,11 @@ def run_distributed(opt, dataset_col, dataset2input_cached):
             client_train_slices = client_train_slices[client_id]  # Use client-specific slices
             client_test_slices = client_test_slices[client_id]
 
+            # Initialize CodeCarbon tracker
+            # tracker = EmissionsTracker()
+            # tracker.start()
+            # start_time = time.time()            
+
             for epoch in range(opt.epoch):
                 print('\n-------------------------------------------------------\n')
                 print(f'Client {client_id + 1} | Epoch: {epoch}')
@@ -111,6 +118,14 @@ def run_distributed(opt, dataset_col, dataset2input_cached):
 
                 # Save the model for the client
                 torch.save(model, os.path.join(model_path, f'client_{client_id + 1}_epoch_{epoch}.pt'))
+            
+            # energy_measurement.end()
+            # end_time = time.time()
+            # total_time = end_time - start_time
+            # emissions = tracker.stop()
+
+            # print(f"Dsitributed Learning Completed. Total Time Taken: {total_time:.2f} seconds.")
+            # print(f"Carbon Emissions: {emissions} kg CO2")
 
         # plot_overall_client_predictions(client_logs_across_epochs)
         torch.cuda.empty_cache()

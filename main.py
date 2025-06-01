@@ -23,7 +23,7 @@ parser.add_argument('--batchSize', type=int,
                     default=128, help='input batch size')
 parser.add_argument('--hiddenSize', type=int,
                     default=100, help='hidden state size')
-parser.add_argument('--epoch', type=int, default=20,
+parser.add_argument('--epoch', type=int, default=1,
                     help='the number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.001,
                     help='learning rate')  # [0.001, 0.0005, 0.0001]
@@ -215,33 +215,6 @@ def main():
     else:
         raise ValueError("Invalid run type. Choose 'distributed' or 'federated'.")
 
-        #========================================================================================
-
-    # model = trans_to_cuda(SessionGraph(opt, n_node))
-    # model_path = 'checkpoint/'+'model_' + \
-    #     str(dataset)+'_'+time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
-    # folder = os.path.exists(model_path)
-    # if not folder:
-    #     os.makedirs(model_path)
-    # print('\nModel_Path:', model_path)
-    # print('\n-------------------------------------------------------\n')
-    # for epoch in range(opt.epoch):
-    #     print('\n-------------------------------------------------------\n')
-    #     print('epoch: ', epoch)
-    #     print('start training: ')
-    #     all_pred,all_targets = train_test_pred(
-    #         model, train_data_list, train_silces, test_data_list, test_silces)
-
-    #     save_name = dataset+'_'+str(epoch)+'_epoch'
-    #     print('start cache test: ')
-    #     _ = single_cache_test(
-    #         test_trace=test_trace[opt.window:-1], all_pred=all_pred, save_name=save_name, dicts=dicts)
-    #     pre,mmr = score_compute(all_preds=all_pred,all_targets=all_targets,save_name = save_name)
-    #     print('pre:',pre)
-    #     print('mmr:',mmr)
-    #     torch.save(model, os.path.join(model_path, str(epoch)+'.pt'))
-
-    
     torch.cuda.empty_cache()
     print('-------------------------------------------------------')
 
