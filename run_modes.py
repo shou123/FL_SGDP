@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from cache import *
 from codecarbon import EmissionsTracker
+import matplotlib.pyplot as plt
 
 # Federated learning requires Flower framework
 try:
@@ -62,6 +63,59 @@ def score_compute(all_preds,all_targets,save_name):
     return pre_list,mmr_list
 
 
+
+def plot_train_test_predictions(train_trace, test_trace, train_preds, test_preds, dicts, window=32, max_points=1000, title="LBA Δ Predictions", client_id=None):
+    _, bo_map_div, _, operation_id_map_div = dicts
+
+    def extract_deltas(trace):
+        return [trace[i] - trace[i + 1] for i in range(len(trace) - 1)]
+
+    def decode_predictions(preds):
+        decoded = []
+        for pred in preds[:max_points]:
+            class_id = pred[0]
+            if class_id <= 0:
+                decoded.append(0)
+            else:
+                delta_class = bo_map_div.get(class_id - 1, 999999)
+                delta = operation_id_map_div.get(delta_class, 0)
+                decoded.append(delta)
+        return decoded
+
+    # Slice traces for visualization range
+    train_trace = train_trace[window:window + max_points + 1]
+    test_trace = test_trace[window:window + max_points + 1]
+
+    # Extract true delta LBA
+    train_true_deltas = extract_deltas(train_trace)
+    test_true_deltas = extract_deltas(test_trace)
+
+    # Decode model predictions
+    train_pred_deltas = decode_predictions(train_preds)
+    test_pred_deltas = decode_predictions(test_preds)
+
+    # Plot all
+    plt.figure(figsize=(14, 6))
+    plt.plot(train_true_deltas, label='Train ΔLBA True', marker='o', alpha=0.5)
+    plt.plot(train_pred_deltas, label='Train ΔLBA Pred', marker='x', linestyle='--', alpha=0.7)
+    plt.plot(test_true_deltas, label='Test ΔLBA True', marker='o', alpha=0.5)
+    plt.plot(test_pred_deltas, label='Test ΔLBA Pred', marker='x', linestyle='--', alpha=0.7)
+    plt.title(title)
+    plt.xlabel('Step')
+    plt.ylabel('Δ LBA')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    if client_id is not None:
+        plt.savefig(f"plots/{title.replace(' ', '_')}_client_{client_id}.png")
+    else:
+        plt.savefig(f"plots/{title.replace(' ', '_')}.png")
+
+
+
+
+
 def run_distributed(opt, dataset_col, dataset2input_cached):
     """
     Run distributed learning mode.
@@ -107,6 +161,28 @@ def run_distributed(opt, dataset_col, dataset2input_cached):
                 print('Start training: ')
                 all_pred, all_targets = train_test_pred(
                     model, client_train, client_train_slices, client_test, client_test_slices,client_id)
+                
+                #=========================================prediction plot==============================================
+                # Train prediction
+                # train_pred, _ = train_test_pred(
+                #     model, client_train, client_train_slices, client_train, client_train_slices, client_id)
+
+                # # Test prediction
+                # test_pred, test_targets = train_test_pred(
+                #     model, client_test, client_test_slices, client_test, client_test_slices, client_id)
+                
+                # plot_train_test_predictions(
+                #     train_trace=train_trace[opt.window:-1],
+                #     test_trace=test_trace[opt.window:-1],
+                #     train_preds=train_pred,
+                #     test_preds=test_pred,
+                #     dicts=dicts,
+                #     window=opt.window,
+                #     max_points=300,
+                #     title=f"Δ LBA Prediction - Client {client_id + 1} Epoch {epoch}",
+                #     client_id = client_id +1
+                # )
+                #======================================================================================================
 
                 save_name = dataset+'_'+str(epoch)+'_epoch'
                 print('Start cache test: ')
@@ -118,6 +194,8 @@ def run_distributed(opt, dataset_col, dataset2input_cached):
 
                 # Save the model for the client
                 torch.save(model, os.path.join(model_path, f'client_{client_id + 1}_epoch_{epoch}.pt'))
+
+
             
             # energy_measurement.end()
             # end_time = time.time()
@@ -234,98 +312,27 @@ def run_federated(opt, dataset_col, dataset2input_cached):
         print("\nFederated Learning Completed.")
         torch.cuda.empty_cache()
 
+        # =================== Post-training: Cache Test and Score Compute ===================
+        print("\nPost-training evaluation for each client:")
+        for client_id in range(num_clients):
+            # Load the trained model for each client if saved, or re-instantiate and load weights if needed
+            model = trans_to_cuda(SessionGraph(opt, n_node))
+            # Optionally, load model weights from checkpoint if you saved them during federated rounds
 
-# def run_federated(opt, dataset_col, dataset2input_cached):
-#     """
-#     Manually run federated learning using FedAvg (no Flower).
-#     """
-#     print("Running Manual Federated Learning with FedAvg...")
-    
-#     for dataset in dataset_col:
-#         print(f"Loading dataset: {dataset}")
-#         train_data_list, train_slices, test_data_list, test_slices, dicts, n_node, train_trace, test_trace = dataset2input_cached(
-#             dataset=dataset, window_size=opt.window, top_num=opt.topnum)
+            # Get test data for this client
+            client_test = client_test_data[client_id]
+            client_test_slices = client_test_slices[client_id]
 
-#         num_clients = opt.NUM_CLIENTS
-#         client_train_data = split_list(train_data_list, num_clients)
-#         client_test_data = split_list(test_data_list, num_clients)
+            # Run prediction on test set
+            all_pred, all_targets = train_test_pred(
+                model, client_test, client_test_slices, client_test, client_test_slices, client_id
+            )
 
-#         # Initialize global model
-#         global_model = trans_to_cuda(SessionGraph(opt, n_node))
-
-#         # Create output directories
-#         model_path = 'checkpoint/' + 'fedavg_' + str(dataset) + '_' + time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
-#         os.makedirs(model_path, exist_ok=True)
-#         print(f"Model path: {model_path}")
-
-#         # Initialize models for each client
-#         client_models = [trans_to_cuda(SessionGraph(opt, n_node)) for _ in range(num_clients)]
-
-#         for round in range(opt.epoch):
-#             print(f"\n=================== Federated Round {round+1}/{opt.epoch} ===================")
-
-#             # Step 1: Send global model to all clients
-#             global_params = global_model.state_dict()
-#             for model in client_models:
-#                 model.load_state_dict(global_params)
-
-#             local_params = []
-#             local_data_sizes = []
-
-#             # Step 2: Train each client locally
-#             for client_id in range(num_clients):
-#                 print(f"\n[Client {client_id}] Local training...")
-#                 model = client_models[client_id]
-#                 train_data = client_train_data[client_id]
-#                 train_loader = DataLoader(train_data, batch_size=opt.batchSize, shuffle=True)
-#                 optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr, weight_decay=opt.l2)
-#                 criterion = nn.CrossEntropyLoss()
-
-#                 model.train()
-#                 for batch in tqdm(train_loader, desc=f"Client {client_id}"):
-#                     alias_inputs, A, items, mask, targets = batch
-#                     optimizer.zero_grad()
-#                     targets = trans_to_cuda(torch.Tensor(targets).long())
-#                     scores = model(items, A)
-#                     loss = criterion(scores, targets)
-#                     loss.backward()
-#                     optimizer.step()
-
-#                 # Save model parameters and size for aggregation
-#                 local_params.append({k: v.cpu().detach().clone() for k, v in model.state_dict().items()})
-#                 local_data_sizes.append(len(train_data))
-
-#             # Step 3: FedAvg aggregation
-#             print("\nAggregating client models with FedAvg...")
-#             new_global_params = {}
-#             total_data = sum(local_data_sizes)
-
-#             for k in global_params.keys():
-#                 new_global_params[k] = sum(
-#                     (local_params[i][k] * (local_data_sizes[i] / total_data) for i in range(num_clients))
-#                 )
-
-#             global_model.load_state_dict(new_global_params)
-
-#             # Optional: evaluate global model
-#             global_model.eval()
-#             test_loader = DataLoader(sum(client_test_data, []), batch_size=opt.batchSize, shuffle=False)
-#             total, correct, loss = 0, 0, 0
-#             criterion = nn.CrossEntropyLoss()
-
-#             with torch.no_grad():
-#                 for batch in test_loader:
-#                     alias_inputs, A, items, mask, targets = batch
-#                     targets = trans_to_cuda(torch.Tensor(targets).long())
-#                     scores = global_model(items, A)
-#                     loss += criterion(scores, targets).item()
-#                     _, predicted = scores.max(1)
-#                     total += targets.size(0)
-#                     correct += predicted.eq(targets).sum().item()
-
-#             acc = correct / total
-#             print(f"[Round {round+1}] Eval Loss: {loss:.4f}, Accuracy: {acc:.4f}")
-
-#         # Final save
-#         torch.save(global_model.state_dict(), os.path.join(model_path, f"global_model_final.pt"))
-#         print(f"Saved final global model to: {model_path}")
+            save_name = f"{dataset}_client{client_id+1}_fed"
+            print(f"Client {client_id+1}: Cache test and score compute")
+            single_cache_test(
+                test_trace=test_trace[opt.window:-1], all_pred=all_pred, save_name=save_name, dicts=dicts
+            )
+            pre, mmr = score_compute(all_preds=all_pred, all_targets=all_targets, save_name=save_name)
+            print('Precision:', pre)
+            print('MMR:', mmr)
